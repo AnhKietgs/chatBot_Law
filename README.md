@@ -159,7 +159,7 @@ docker compose exec ollama ollama pull nomic-embed-text
 python evaluation/run_ragas.py evaluation/golden_questions.jsonl --api-base-url http://localhost:8000 --admin-email $env:ADMIN_EMAIL --admin-password $env:ADMIN_PASSWORD --judge-base-url http://localhost:11434/v1 --judge-model Qwen3.5:4b --judge-embedding-model nomic-embed-text
 ```
 
-Quality gate mục tiêu: citation đúng 100%, grounded ≥ 90%, safe abstention ≥ 95%, Faithfulness ≥ 0.90, Answer Relevancy ≥ 0.80, Context Precision ≥ 0.80 và Context Recall ≥ 0.90. GitHub Actions cố ý fail nếu thiếu staging/judge secrets hoặc chưa có đúng 100 câu đã được chuyên gia duyệt; template không được xem là dữ liệu release.
+Quality gate mục tiêu: citation đúng 100%, grounded ≥ 90%, safe abstention ≥ 95%, Faithfulness ≥ 0.90, Answer Relevancy ≥ 0.80, Context Precision ≥ 0.80 và Context Recall ≥ 0.90. Với phiên bản CV/demo, workflow RAGAS chỉ chạy thủ công và sẽ `SKIPPED` thay vì làm CI thất bại khi chưa có staging/judge secrets. Khi đã cấu hình đầy đủ, workflow vẫn yêu cầu đúng 100 câu được chuyên gia duyệt; template không được xem là dữ liệu release.
 
 `Answer Relevancy` cần cả judge LLM và embedding model. Với Ollama local, pull `nomic-embed-text` như trên; trên CI đặt biến `RAGAS_JUDGE_MODEL` và `RAGAS_JUDGE_EMBEDDING_MODEL` theo các model mà judge endpoint hỗ trợ.
 
