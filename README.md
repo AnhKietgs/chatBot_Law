@@ -169,3 +169,7 @@ Quality gate mục tiêu: citation đúng 100%, grounded ≥ 90%, safe abstentio
 - `LLM_TEMPERATURE=0.1` để ưu tiên tính ổn định cho nghiệp vụ pháp lý.
 - Chỉ xuất bản văn bản có nguồn chính thức và đã được người có thẩm quyền kiểm tra cấu trúc.
 - Không commit `.env`, mật khẩu, JWT secret hoặc tài liệu pháp lý không được phép công bố.
+
+## Sơ đồ kiến trúc
+
+![Sơ đồ kiến trúc](docs/images/architecture.png)
