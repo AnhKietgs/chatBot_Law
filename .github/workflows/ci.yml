@@ -16,6 +16,10 @@ jobs:
           python-version: "3.12"
       - name: Compile evaluator scripts
         run: python -m py_compile evaluation/golden.py evaluation/validate_golden.py evaluation/run_benchmark.py evaluation/run_ragas.py
+      - name: Test evaluator control flow without calling a judge model
+        run: |
+          python -m pip install pytest httpx==0.28.1
+          python -m pytest evaluation/tests -q
       - name: Verify the published template is intentionally not a release dataset
         run: |
           if python evaluation/validate_golden.py evaluation/golden_questions.example.jsonl; then

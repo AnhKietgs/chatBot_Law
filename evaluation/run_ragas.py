@@ -20,8 +20,6 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-import httpx
-
 from golden import GoldenCase, load_golden_cases
 
 
@@ -40,31 +38,41 @@ def citation_locator(citation: dict[str, Any]) -> tuple[str, str, str | None, st
     return (citation["document_code"], citation["article"], citation.get("clause"), citation.get("point"))
 
 
-def admin_token(client: httpx.Client, email: str, password: str) -> str:
+def admin_token(client: Any, email: str, password: str) -> str:
     response = client.post("/api/v1/admin/token", json={"email": email, "password": password})
     response.raise_for_status()
     return response.json()["access_token"]
 
 
-def create_ragas_metrics(*, model: str, base_url: str, api_key: str):
+def create_ragas_metrics(*, model: str, embedding_model: str, base_url: str, api_key: str):
     """Build RAGAS v0.4 metrics using an OpenAI-compatible judge endpoint.
 
     Ollama exposes this compatibility surface at /v1, allowing a local Qwen
     judge. A stronger independently hosted model may be configured in CI.
     """
     try:
-        from openai import AsyncOpenAI
+        from openai import AsyncOpenAI, OpenAI
+        from ragas.embeddings.base import embedding_factory
         from ragas.llms import llm_factory
         from ragas.metrics.collections import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
     except ImportError as exc:  # pragma: no cover - exercised in evaluator image/CI
         raise RuntimeError(
             "Thiếu evaluator dependencies. Chạy: pip install -r evaluation/requirements-ragas.txt"
         ) from exc
-    client = AsyncOpenAI(base_url=base_url.rstrip("/"), api_key=api_key)
-    judge_llm = llm_factory(model=model, client=client)
+    endpoint = base_url.rstrip("/")
+    llm_client = AsyncOpenAI(base_url=endpoint, api_key=api_key)
+    # AnswerRelevancy computes cosine similarity synchronously, so it needs a
+    # synchronous embedding client even though the judge LLM is asynchronous.
+    embedding_client = OpenAI(base_url=endpoint, api_key=api_key)
+    judge_llm = llm_factory(model=model, client=llm_client)
+    judge_embeddings = embedding_factory(
+        "openai",
+        model=embedding_model,
+        client=embedding_client,
+    )
     return {
         "faithfulness": Faithfulness(llm=judge_llm),
-        "answer_relevancy": AnswerRelevancy(llm=judge_llm),
+        "answer_relevancy": AnswerRelevancy(llm=judge_llm, embeddings=judge_embeddings),
         "context_precision": ContextPrecision(llm=judge_llm),
         "context_recall": ContextRecall(llm=judge_llm),
     }
@@ -89,23 +97,12 @@ async def score_metric(metric: Any, kwargs: dict[str, Any]) -> float:
 
 
 async def score_grounded_case(metrics: dict[str, Any], case: GoldenCase, trace: dict[str, Any]) -> dict[str, float]:
+    """Score one grounded answer against its retrieved evidence and gold answer."""
     common = {
         "user_input": case.question,
         "response": trace["answer"]["answer"],
         "retrieved_contexts": trace["retrieved_contexts"],
     }
-
-
-async def score_all_grounded_cases(
-    metrics: dict[str, Any],
-    scoring_inputs: list[tuple[GoldenCase, dict[str, Any], dict[str, Any]]],
-) -> None:
-    """Score serially in one event loop; local Ollama normally serves one judge at a time."""
-    for case, row, trace in scoring_inputs:
-        try:
-            row["metrics"] = await score_grounded_case(metrics, case, trace)
-        except Exception as exc:  # Never silently mark a failed RAGAS metric as passing.
-            row["error"] = f"RAGAS scoring failed: {type(exc).__name__}: {exc}"
     return {
         "faithfulness": await score_metric(metrics["faithfulness"], common),
         "answer_relevancy": await score_metric(metrics["answer_relevancy"], {
@@ -125,26 +122,51 @@ async def score_all_grounded_cases(
     }
 
 
+async def score_all_grounded_cases(
+    metrics: dict[str, Any],
+    scoring_inputs: list[tuple[GoldenCase, dict[str, Any], dict[str, Any]]],
+) -> None:
+    """Score serially in one event loop; local Ollama normally serves one judge at a time."""
+    for case, row, trace in scoring_inputs:
+        try:
+            row["metrics"] = await score_grounded_case(metrics, case, trace)
+        except Exception as exc:  # Never silently mark a failed RAGAS metric as passing.
+            row["error"] = f"RAGAS scoring failed: {type(exc).__name__}: {exc}"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("golden_path")
     parser.add_argument("--api-base-url", default=os.getenv("EVAL_API_BASE_URL", "http://localhost:8000"))
     parser.add_argument("--admin-email", default=os.getenv("EVAL_ADMIN_EMAIL"))
     parser.add_argument("--admin-password", default=os.getenv("EVAL_ADMIN_PASSWORD"))
-    parser.add_argument("--judge-base-url", default=os.getenv("RAGAS_JUDGE_BASE_URL", "http://localhost:11434/v1"))
-    parser.add_argument("--judge-api-key", default=os.getenv("RAGAS_JUDGE_API_KEY", "ollama"))
-    parser.add_argument("--judge-model", default=os.getenv("RAGAS_JUDGE_MODEL", "Qwen3.5:4b"))
+    parser.add_argument("--judge-base-url", default=os.getenv("RAGAS_JUDGE_BASE_URL") or "http://localhost:11434/v1")
+    parser.add_argument("--judge-api-key", default=os.getenv("RAGAS_JUDGE_API_KEY") or "ollama")
+    parser.add_argument("--judge-model", default=os.getenv("RAGAS_JUDGE_MODEL") or "Qwen3.5:4b")
+    parser.add_argument(
+        "--judge-embedding-model",
+        default=os.getenv("RAGAS_JUDGE_EMBEDDING_MODEL") or "nomic-embed-text",
+    )
     parser.add_argument("--report", default=None)
     return parser.parse_args()
 
 
 def main() -> int:
+    try:
+        import httpx
+    except ImportError as exc:
+        raise SystemExit(
+            "Thiếu evaluator dependencies. Chạy: pip install -r evaluation/requirements-ragas.txt"
+        ) from exc
     args = parse_args()
     if not args.admin_email or not args.admin_password:
         raise SystemExit("Cần EVAL_ADMIN_EMAIL và EVAL_ADMIN_PASSWORD của môi trường đánh giá.")
     cases = load_golden_cases(args.golden_path, required_count=100)
     metrics = create_ragas_metrics(
-        model=args.judge_model, base_url=args.judge_base_url, api_key=args.judge_api_key,
+        model=args.judge_model,
+        embedding_model=args.judge_embedding_model,
+        base_url=args.judge_base_url,
+        api_key=args.judge_api_key,
     )
     case_reports: list[dict[str, Any]] = []
     scoring_inputs: list[tuple[GoldenCase, dict[str, Any], dict[str, Any]]] = []
@@ -195,6 +217,7 @@ def main() -> int:
         "created_at": datetime.now(UTC).isoformat(),
         "api_base_url": args.api_base_url,
         "judge_model": args.judge_model,
+        "judge_embedding_model": args.judge_embedding_model,
         "case_count": len(cases),
         "thresholds": DEFAULT_THRESHOLDS,
         "summary": summary,

@@ -20,12 +20,15 @@ jobs:
           EVAL_API_BASE_URL: ${{ secrets.EVAL_API_BASE_URL }}
           EVAL_ADMIN_EMAIL: ${{ secrets.EVAL_ADMIN_EMAIL }}
           EVAL_ADMIN_PASSWORD: ${{ secrets.EVAL_ADMIN_PASSWORD }}
+          RAGAS_JUDGE_BASE_URL: ${{ secrets.RAGAS_JUDGE_BASE_URL }}
+          RAGAS_JUDGE_API_KEY: ${{ secrets.RAGAS_JUDGE_API_KEY }}
         run: |
-          if [ -n "$EVAL_API_BASE_URL" ] && [ -n "$EVAL_ADMIN_EMAIL" ] && [ -n "$EVAL_ADMIN_PASSWORD" ]; then
+          if [ -n "$EVAL_API_BASE_URL" ] && [ -n "$EVAL_ADMIN_EMAIL" ] && [ -n "$EVAL_ADMIN_PASSWORD" ] && [ -n "$RAGAS_JUDGE_BASE_URL" ] && [ -n "$RAGAS_JUDGE_API_KEY" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "RAGAS gate is not configured: add the staging URL and admin credentials as GitHub Actions secrets."
+            echo "::error::RAGAS quality gate is not configured. Add staging API/admin and judge endpoint secrets."
+            exit 1
           fi
 
   ragas:
@@ -50,6 +53,7 @@ jobs:
           RAGAS_JUDGE_BASE_URL: ${{ secrets.RAGAS_JUDGE_BASE_URL }}
           RAGAS_JUDGE_API_KEY: ${{ secrets.RAGAS_JUDGE_API_KEY }}
           RAGAS_JUDGE_MODEL: ${{ vars.RAGAS_JUDGE_MODEL }}
+          RAGAS_JUDGE_EMBEDDING_MODEL: ${{ vars.RAGAS_JUDGE_EMBEDDING_MODEL }}
         run: |
           python evaluation/run_benchmark.py evaluation/golden_questions.jsonl
           python evaluation/run_ragas.py evaluation/golden_questions.jsonl --report evaluation/reports/ragas-ci.json
