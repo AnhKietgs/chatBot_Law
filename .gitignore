@@ -20,3 +20,4 @@ evaluation/reports/
 # AI agent working files — không commit lên git
 .superpowers/
 docs/superpowers/
+.tmp_ai_engineering_render/

@@ -173,3 +173,4 @@ Quality gate mục tiêu: citation đúng 100%, grounded ≥ 90%, safe abstentio
 ## Sơ đồ kiến trúc
 
 ![Sơ đồ kiến trúc](docs/images/architecture.png)
+  
